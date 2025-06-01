@@ -188,11 +188,6 @@ if __name__ == '__main__':
     if rank == 0:
         logger.info(f'Train for {cfg["epochs"]} epochs / {total_iters} iterations.')
     previous_best = 0.0
-    previous_best = 0.0
-    best_epoch = -1  # track when the best model was achieved
-    min_epoch_threshold = int(cfg['epochs'] * 2 / 3)  # 2/3 threshold
-    valid_best = 0.0  # best mIoU after the threshold
-    valid_best_epoch = -1  # epoch of valid best model
     epoch = -1
     
     for epoch in range(epoch + 1, cfg['epochs']):
@@ -418,73 +413,21 @@ if __name__ == '__main__':
                 logger.info(run_name)
                 for (cls_idx, iou) in enumerate(iou_class):
                     logger.info('***** Evaluation ***** >>>> Class [{:} {:}] '
-                                'IoU: {:.2f}'.format(cls_idx, iou, CLASSES[cfg['dataset']][cls_idx], iou))
+                                'IoU: {:.2f}'.format(cls_idx, CLASSES[cfg['dataset']][cls_idx], iou))
                 logger.info('***** Evaluation {} ***** >>>> MeanIoU: {:.2f}\n'.format(eval_mode, mIoU))
                 
                 writer.add_scalar('eval/mIoU', mIoU, epoch)
                 for i, iou in enumerate(iou_class):
                     writer.add_scalar('eval/%s_IoU' % (CLASSES[cfg['dataset']][i]), iou, epoch)
 
-            # Track overall best (for logging purposes)
-            is_overall_best = mIoU > previous_best
-            if is_overall_best:
-                previous_best = mIoU
-                best_epoch = epoch
-            
-            # Only consider models after 2/3 of training as valid candidates
-            is_valid_best = False
-            if epoch >= min_epoch_threshold:
-                if mIoU > valid_best:
-                    valid_best = mIoU
-                    valid_best_epoch = epoch
-                    is_valid_best = True
-                    
-                if rank == 0:
-                    logger.info(f'***** EARLY CONSTRAINT CHECK *****')
-                    logger.info(f'Current epoch: {epoch}, Min epoch threshold (2/3): {min_epoch_threshold}')
-                    logger.info(f'Overall best mIoU: {previous_best:.2f} at epoch {best_epoch}')
-                    logger.info(f'Valid best mIoU (after 2/3): {valid_best:.2f} at epoch {valid_best_epoch}')
-                    
-                    if best_epoch < min_epoch_threshold:
-                        logger.info(f'Overall best model was achieved too early (epoch {best_epoch} < {min_epoch_threshold})')
-                        logger.info(f'Using model from epoch {valid_best_epoch} instead')
-            
+            is_best = mIoU > previous_best
+            previous_best = max(mIoU, previous_best)
             if rank == 0:
                 checkpoint = {
                     'model': model.state_dict(),
                     'optimizer': optimizer.state_dict(),
                     'epoch': epoch,
-                    'mIoU': mIoU,
-                    'overall_best_epoch': best_epoch,
-                    'overall_best_mIoU': previous_best,
-                    'valid_best_epoch': valid_best_epoch,
-                    'valid_best_mIoU': valid_best,
                 }
-                
-                # Always save latest
                 torch.save(checkpoint, os.path.join(save_path, 'latest.pth'))
-                
-                # Save overall best (for reference, but may not be used)
-                if is_overall_best:
-                    torch.save(checkpoint, os.path.join(save_path, 'best_overall.pth'))
-                    
-                # Save valid best (2/3)
-                if is_valid_best:
-                    torch.save(checkpoint, os.path.join(save_path, 'best.pth'))  # This replaces the old best.pth
-                    logger.info(f'Saved new valid best model: epoch {epoch}, mIoU {mIoU:.2f}')
-
-                # Final check at the end of training
-                if rank == 0:
-                    logger.info(f'\n***** TRAINING COMPLETE - FINAL MODEL SELECTION *****')
-                    logger.info(f'Total epochs: {cfg["epochs"]}, Min epoch threshold (2/3): {min_epoch_threshold}')
-                    logger.info(f'Overall best: {previous_best:.2f} at epoch {best_epoch}')
-                    logger.info(f'Valid best (after 2/3): {valid_best:.2f} at epoch {valid_best_epoch}')
-                    
-                    if best_epoch < min_epoch_threshold:
-                        logger.info(f'Best overall model was at epoch {best_epoch} (too early)')
-                        logger.info(f'RECOMMENDED MODEL: epoch {valid_best_epoch} with mIoU {valid_best:.2f}')
-                        logger.info(f'Performance difference: {previous_best - valid_best:.2f} mIoU')
-                    else:
-                        logger.info(f'Best model was achieved after 2/3 of training')
-                    
-                    logger.info(f'FINAL MODEL SAVED AS: best.pth (epoch {valid_best_epoch})')
+                if is_best:
+                    torch.save(checkpoint, os.path.join(save_path, 'best.pth'))
