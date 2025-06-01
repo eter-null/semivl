@@ -325,7 +325,7 @@ def generate_experiment_cfgs(exp_id):
         kwargs_list = [
             dict(
                 model='mmseg.vlm-dlv3p-bn12-sk4-ftap-mcvitb', 
-                lr=1e-3,  
+                lr=1e-4,  
                 backbone_lr_mult=0.1,  
                 criterion='CELoss',  
                 # adjusted CLIP guidance parameters for binary segmentation
