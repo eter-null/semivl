@@ -325,7 +325,7 @@ def generate_experiment_cfgs(exp_id):
         kwargs_list = [
             dict(
                 model='mmseg.vlm-dlv3p-bn12-sk4-ftap-mcvitb', 
-                lr=1e-4,  
+                lr=1e-3,  
                 backbone_lr_mult=0.1,  
                 criterion='CELoss',  
                 # adjusted CLIP guidance parameters for binary segmentation
@@ -346,7 +346,7 @@ def generate_experiment_cfgs(exp_id):
         ]
         for kwargs, split, _ in itertools.product(kwargs_list, splits, range(n_repeat)):
             # GPU configuration
-            kwargs['n_nodes'], kwargs['n_gpus'], kwargs['batch_size'] = 1, 1, 1 
+            kwargs['n_nodes'], kwargs['n_gpus'], kwargs['batch_size'] = 1, 1, 1
 
             cfg = config_from_vars(
                 exp_id=exp_id,
