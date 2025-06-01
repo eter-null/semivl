@@ -95,6 +95,12 @@ ADE_PALETTE = np.array([
         *[[255, 255, 255] for i in range(256 - 150 - 1)],
         [224, 224, 192]], dtype=np.uint8)
 
+BRICKFIELD_PALETTE = np.array([
+        [0, 0, 0],           # Background - class 0 (black)
+        [255, 128, 0],       # Brickfield - class 1 (orange)
+        *[[255, 255, 255] for i in range(256 - 2 - 1)],  # Fill the rest with white
+        [224, 224, 192]], dtype=np.uint8)  # Last color same as other palettes
+
 
 def get_palette(dataset):
     if dataset == 'pascal':
@@ -105,5 +111,7 @@ def get_palette(dataset):
         return COCO_PALETTE
     elif dataset == 'ade':
         return ADE_PALETTE
+    elif dataset == 'brickfield':
+        return BRICKFIELD_PALETTE
     else:
         raise ValueError(dataset)
