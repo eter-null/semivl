@@ -20,6 +20,9 @@ import clip
 import argparse
 
 
+## Brickfield binary classification
+Brickfield_classes = ['non-brickfield', 'brickfield']
+
 ## VOC12 w/ background
 VOC12_wbg_classes = ['background', 'aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
                'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog',
@@ -206,48 +209,52 @@ def flatten_class_concepts(class_concepts):
     return concepts, concept_to_class_idx, class_to_concept_idxs
 
 def get_class_to_concept_idxs(save_path):
-    if save_path == 'configs/_base_/datasets/text_embedding/voc12_wbg_concept4_single.npy':
+    if save_path == '../configs/_base_/datasets/text_embedding/voc12_wbg_concept4_single.npy':
         _, _, class_to_concept_idxs = flatten_class_concepts(VOC12_wbg_classes_w_concepts4)
-    elif save_path == 'configs/_base_/datasets/text_embedding/cityscapes_concept3_single.npy':
+    elif save_path == '../configs/_base_/datasets/text_embedding/cityscapes_concept3_single.npy':
         _, _, class_to_concept_idxs = flatten_class_concepts(Cityscapes_classes_w_concepts3)
     else:
         raise ValueError(save_path)
     return class_to_concept_idxs
 
 def prepare_text_embedding(save_path):
+    save_path = os.path.abspath(save_path)
     assert os.path.isdir(os.path.dirname(save_path))
     # assert not os.path.isfile(save_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, _ = clip.load('ViT-B/16', device)
 
     ## VOC12 with background:
-    if save_path == 'configs/_base_/datasets/text_embedding/voc12_wbg_single.npy':
+    if save_path == '../configs/_base_/datasets/text_embedding/voc12_wbg_single.npy':
         single_template(save_path, VOC12_wbg_classes, model)
-    elif save_path == 'configs/_base_/datasets/text_embedding/voc12_wbg_conceptavg4_single.npy':
+    elif save_path == '../configs/_base_/datasets/text_embedding/voc12_wbg_conceptavg4_single.npy':
         single_template_concept_avg(save_path, VOC12_wbg_classes_w_concepts4, model)
-    elif save_path == 'configs/_base_/datasets/text_embedding/voc12_wbg_concept4_single.npy':
+    elif save_path == '../configs/_base_/datasets/text_embedding/voc12_wbg_concept4_single.npy':
         flat_concepts, _, _ = flatten_class_concepts(VOC12_wbg_classes_w_concepts4)
         single_template(save_path, flat_concepts, model)
     ## COCO:
-    elif save_path == 'configs/_base_/datasets/text_embedding/coco_single.npy':
+    elif save_path == '../configs/_base_/datasets/text_embedding/coco_single.npy':
         single_template(save_path, COCO_classes, model)
     ## Cityscapes:
-    elif save_path == 'configs/_base_/datasets/text_embedding/cityscapes_single.npy':
+    elif save_path == '../configs/_base_/datasets/text_embedding/cityscapes_single.npy':
         single_template(save_path, Cityscapes_classes, model)
-    elif save_path == 'configs/_base_/datasets/text_embedding/cityscapes_concept3_single.npy':
+    elif save_path == '../configs/_base_/datasets/text_embedding/cityscapes_concept3_single.npy':
         flat_concepts, _, _ = flatten_class_concepts(Cityscapes_classes_w_concepts3)
         single_template(save_path, flat_concepts, model)
-    elif save_path == 'configs/_base_/datasets/text_embedding/cityscapes_conceptavg3_single.npy':
+    elif save_path == '../configs/_base_/datasets/text_embedding/cityscapes_conceptavg3_single.npy':
         single_template_concept_avg(save_path, Cityscapes_classes_w_concepts3, model)
     ## ADE20k:
-    elif save_path == 'configs/_base_/datasets/text_embedding/ade_single.npy':
+    elif save_path == '../configs/_base_/datasets/text_embedding/ade_single.npy':
         single_template(save_path, ADE_classes, model)
+    ## Brickfield:
+    elif save_path.endswith('brickfield_single.npy'):
+        single_template(save_path, Brickfield_classes, model)
     else:
         raise NotImplementedError(save_path)
 
-
+# run python text_embeddings.py brickfield_single to generate the brickfield clip text-embedding
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('name')
     args = parser.parse_args()
-    prepare_text_embedding(f'configs/_base_/datasets/text_embedding/{args.name}.npy')
+    prepare_text_embedding(f'../configs/_base_/datasets/text_embedding/{args.name}.npy')

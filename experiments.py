@@ -23,7 +23,7 @@ import collections.abc
 from version import __version__
 
 
-DATA_DIR = '/app/SemiVL_Brickfield/data'
+DATA_DIR = '/app/data'
 
 
 def nested_set(dic, key, value):
