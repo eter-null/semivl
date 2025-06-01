@@ -23,7 +23,7 @@ import collections.abc
 from version import __version__
 
 
-DATA_DIR = '~/data/'
+DATA_DIR = '/app/SemiVL_Brickfield/data'
 
 
 def nested_set(dic, key, value):
@@ -59,14 +59,14 @@ def human_format(num):
 
 def config_from_vars(
     exp_id,
-    gpu_model='a100',
-    n_gpus=4,
+    gpu_model='l40s',  # Changed from 'l4' to 'l40s'
+    n_gpus=1,        # Changed from 4 to 1
     n_nodes=1,
-    batch_size=2,
-    epochs=80,
+    batch_size=1,
+    epochs=10,
     iters=None,
     scheduler_max_iters=None,
-    dataset='pascal',
+    dataset='brickfield',       # cahanged default dataset from pascal to brickfield
     split='92',
     img_scale=[2048, 512],
     scale_ratio_range=(0.5, 2.0),
@@ -98,7 +98,7 @@ def config_from_vars(
     text_embedding_variant='single',
     eval_mode='zegclip_sliding_window',
     eval_every=1,
-    nccl_p2p_disable=False,
+    nccl_p2p_disable=True,  # Changed from False to True
 ):
     cfg = dict()
     name = ''
@@ -111,13 +111,18 @@ def config_from_vars(
         cityscapes=osp.join(DATA_DIR, 'cityscapes/'),
         coco=osp.join(DATA_DIR, 'coco/'),
         ade=osp.join(DATA_DIR, 'ADEChallengeData2016/'),
+        brickfield=osp.join(DATA_DIR, 'BrickField_512/'),
     )[dataset]
     cfg['nclass'] = dict(
         pascal=21,
         cityscapes=19,
         coco=81,
         ade=150,
+        brickfield=2,
     )[dataset]
+    if dataset == 'brickfield':
+        # Add any special configurations needed for your dataset
+        cfg['reduce_zero_label'] = False
     if dataset == 'ade':
         cfg['reduce_zero_label'] = True
     cfg['split'] = split
@@ -312,9 +317,54 @@ def generate_experiment_cfgs(exp_id):
     cfgs = []
 
     # -------------------------------------------------------------------------
+    # SemiVL on Brickfield
+    # -------------------------------------------------------------------------
+    if exp_id == 45: 
+        n_repeat = 1
+        splits = [269, 539, 1079, 2158, 5397]  # dataset splits
+        kwargs_list = [
+            dict(
+                model='mmseg.vlm-dlv3p-bn12-sk4-ftap-mcvitb', 
+                lr=1e-4,  
+                backbone_lr_mult=0.1,  
+                criterion='CELoss',  
+                # adjusted CLIP guidance parameters for binary segmentation
+                maskclip_consistency_lambda=0.05,
+                mcc_conf_thresh=0.7,  
+                mcc_loss_reduce='mean_valid',  
+                text_embedding_variant='single',  
+                pl_text='same',  
+                mcc_text='same',  
+                maskclip_class_filter=None,  
+                conv_enc_lr_mult=1.0,  
+                use_fp=True,
+                conf_mode='pixelwise',
+                pleval=True,
+                disable_dropout=False,  # changed from True - enable dropout for regularization
+                fp_rate=0.7, 
+            ),
+        ]
+        for kwargs, split, _ in itertools.product(kwargs_list, splits, range(n_repeat)):
+            # GPU configuration
+            kwargs['n_nodes'], kwargs['n_gpus'], kwargs['batch_size'] = 1, 1, 1 
+
+            cfg = config_from_vars(
+                exp_id=exp_id,
+                dataset='brickfield',  
+                split=str(split),
+                epochs=10,  
+                conf_thresh=0.8,  
+                criterion_u='CELoss',  #
+                img_scale=[512, 512],  
+                crop_size=512,
+                eval_every=2,
+                **kwargs,
+            )
+            cfgs.append(cfg)
+    # -------------------------------------------------------------------------
     # SemiVL on VOC
     # -------------------------------------------------------------------------
-    if exp_id == 40:
+    elif exp_id == 40:
         n_repeat = 1
         splits = [92, 183, 366, 732, 1464]
         list_kwargs = [
