@@ -121,6 +121,7 @@ def build_model(cfg):
                 'cityscapes': 'cityscapes',
                 'coco': 'coco',
                 'ade': 'ade',
+                'brickfield': 'brickfield',
             }[cfg['dataset']]
             text_embedding_variant = cfg['text_embedding_variant']
             text_embedding = f'configs/_base_/datasets/text_embedding/{emb_dataset_prefix}_{text_embedding_variant}.npy'
