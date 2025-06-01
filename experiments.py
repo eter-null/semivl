@@ -59,14 +59,14 @@ def human_format(num):
 
 def config_from_vars(
     exp_id,
-    gpu_model='l40s',  # Changed from 'l4' to 'l40s'
-    n_gpus=1,        # Changed from 4 to 1
+    gpu_model='l40s',  # changed from 'l4' to 'l40s'
+    n_gpus=1,        # changed from 4 to 1
     n_nodes=1,
     batch_size=1,
     epochs=10,
     iters=None,
     scheduler_max_iters=None,
-    dataset='brickfield',       # cahanged default dataset from pascal to brickfield
+    dataset='brickfield',       # changed default dataset from pascal to brickfield
     split='92',
     img_scale=[2048, 512],
     scale_ratio_range=(0.5, 2.0),
@@ -352,7 +352,7 @@ def generate_experiment_cfgs(exp_id):
                 exp_id=exp_id,
                 dataset='brickfield',  
                 split=str(split),
-                epochs=10,  
+                epochs=30,  
                 conf_thresh=0.8,  
                 criterion_u='CELoss',  #
                 img_scale=[512, 512],  
