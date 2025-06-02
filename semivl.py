@@ -22,6 +22,7 @@ import uuid
 import time
 from datetime import datetime
 
+import wandb
 import mmcv
 import torch
 import torch.backends.cudnn as cudnn
@@ -85,6 +86,30 @@ if __name__ == '__main__':
         run_name = f'{timestr}_{cfg["name"]}_v{__version__}_{uid}'.replace('.', '-')
         save_path = f'exp/exp-{cfg["exp"]}/{run_name}'
         os.makedirs(save_path, exist_ok=True)
+
+        # Initialize wandb
+        wandb.init(
+            project=cfg.get('wandb_project', 'semi-supervised-segmentation'),
+            name=run_name,
+            config={
+                **cfg,
+                **vars(args),
+                'labeled_id_path': labeled_id_path,
+                'unlabeled_id_path': unlabeled_id_path,
+                'ngpus': world_size,
+                'exec_git_rev': get_git_revision(),
+                'exec_version': __version__
+            },
+            dir=save_path,
+            tags=cfg.get('wandb_tags', []),
+            notes=cfg.get('wandb_notes', ''),
+            resume='allow',
+            id=f"{cfg['name']}_{uid}"
+        )
+
+        # Watch model for gradients and parameters
+        if cfg.get('wandb_watch_model', False):
+            wandb.watch(model, log='all', log_freq=cfg.get('wandb_watch_freq', 1000))
 
         formatter = logging.Formatter(fmt='[%(asctime)s] [%(levelname)-8s] %(message)s')
         fileHandler = logging.FileHandler(f'{save_path}/debug.log')
@@ -363,47 +388,120 @@ if __name__ == '__main__':
 
             if i % 100 == 0 and rank == 0:
                 logger.info(f'Iters: {i} ' + str(log_avg))
+
+                # Log to both tensorboard and wandb
+                log_dict = {}
                 for k, v in log_avg.avgs.items():
                     writer.add_scalar(k, v, iters)
+                    log_dict[k] = v
 
+                log_dict.update({
+                    'epoch': epoch,
+                    'iteration': iters,
+                    'learning_rate': optimizer.param_groups[0]['lr'],
+                    'learning_rate_multi': optimizer.param_groups[1]['lr'] if len(optimizer.param_groups) > 1 else None,
+                })
+
+                if maskclip_consistency_lambda != 0:
+                    log_dict['train/mcc_lambda'] = current_mcc_lambda
+
+                wandb.log(log_dict, step=iters)
                 log_avg.reset()
 
-            if iters % len(trainloader_u) == 0 and rank == 0:
-                print('Save debug images at iteration', iters)
-                out_dir = os.path.join(save_path, 'debug')
-                os.makedirs(out_dir, exist_ok=True)
-                for b_i in range(img_x.shape[0]):
-                    rows, cols = 3, 4
-                    plot_dicts = [
-                        dict(title='Image L', data=img_x[b_i], type='image'),
-                        dict(title='Image S1', data=img_s1[b_i], type='image'),
-                        dict(title='Image S2', data=img_s2[b_i], type='image'),
-                        dict(title='Image FP', data=img_w[b_i], type='image'),
-                        dict(title='Pred L', data=pred_x[b_i], type='prediction', palette=palette),
-                        dict(title='Pred S1', data=pred_s1[b_i], type='prediction', palette=palette),
-                        dict(title='Pred S2', data=pred_s2[b_i], type='prediction', palette=palette),
-                        dict(title='Pred FP', data=pred_w_fp[b_i], type='prediction', palette=palette),
-                        dict(title='GT L', data=mask_x[b_i], type='label', palette=palette),
-                        dict(title='PL S1', data=mask_w_mixed1[b_i], type='label', palette=palette),
-                        dict(title='PL S2', data=mask_w_mixed2[b_i], type='label', palette=palette),
-                        dict(title='PL FP', data=mask_w[b_i], type='label', palette=palette),
-                    ]
-                    if maskclip_consistency_lambda != 0:
-                        plot_dicts.extend([
-                            None,
-                            dict(title='MC S1', data=mclip_mixed1[b_i], type='label', palette=palette),
-                            dict(title='MC S2', data=mclip_mixed2[b_i], type='label', palette=palette),
-                            dict(title='MC FP', data=mclip[b_i], type='label', palette=palette),
-                        ])
-                        rows += 1
-                    fig, axs = plt.subplots(
-                        rows, cols, figsize=(2 * cols, 2 * rows), squeeze=False, 
-                        gridspec_kw={'hspace': 0.1, 'wspace': 0, 'top': 0.95, 'bottom': 0, 'right': 1, 'left': 0})
-                    for ax, plot_dict in zip(axs.flat, plot_dicts):
-                        if plot_dict is not None:
-                            plot_data(ax, **plot_dict)
-                    plt.savefig(os.path.join(out_dir, f'{(iters):07d}_{rank}-{b_i}.png'))
-                    plt.close()
+            # Matplotlib saving section
+            # if iters % len(trainloader_u) == 0 and rank == 0:
+            #     print('Save debug images at iteration', iters)
+            #     out_dir = os.path.join(save_path, 'debug')
+            #     os.makedirs(out_dir, exist_ok=True)
+            #     for b_i in range(img_x.shape[0]):
+            #         rows, cols = 3, 4
+            #         plot_dicts = [
+            #             dict(title='Image L', data=img_x[b_i], type='image'),
+            #             dict(title='Image S1', data=img_s1[b_i], type='image'),
+            #             dict(title='Image S2', data=img_s2[b_i], type='image'),
+            #             dict(title='Image FP', data=img_w[b_i], type='image'),
+            #             dict(title='Pred L', data=pred_x[b_i], type='prediction', palette=palette),
+            #             dict(title='Pred S1', data=pred_s1[b_i], type='prediction', palette=palette),
+            #             dict(title='Pred S2', data=pred_s2[b_i], type='prediction', palette=palette),
+            #             dict(title='Pred FP', data=pred_w_fp[b_i], type='prediction', palette=palette),
+            #             dict(title='GT L', data=mask_x[b_i], type='label', palette=palette),
+            #             dict(title='PL S1', data=mask_w_mixed1[b_i], type='label', palette=palette),
+            #             dict(title='PL S2', data=mask_w_mixed2[b_i], type='label', palette=palette),
+            #             dict(title='PL FP', data=mask_w[b_i], type='label', palette=palette),
+            #         ]
+            #         if maskclip_consistency_lambda != 0:
+            #             plot_dicts.extend([
+            #                 None,
+            #                 dict(title='MC S1', data=mclip_mixed1[b_i], type='label', palette=palette),
+            #                 dict(title='MC S2', data=mclip_mixed2[b_i], type='label', palette=palette),
+            #                 dict(title='MC FP', data=mclip[b_i], type='label', palette=palette),
+            #             ])
+            #             rows += 1
+            #         fig, axs = plt.subplots(
+            #             rows, cols, figsize=(2 * cols, 2 * rows), squeeze=False,
+            #             gridspec_kw={'hspace': 0.1, 'wspace': 0, 'top': 0.95, 'bottom': 0, 'right': 1, 'left': 0})
+            #         for ax, plot_dict in zip(axs.flat, plot_dicts):
+            #             if plot_dict is not None:
+            #                 plot_data(ax, **plot_dict)
+            #         plt.savefig(os.path.join(out_dir, f'{(iters):07d}_{rank}-{b_i}.png'))
+            #         plt.close()
+
+        # Log debug images to wandb (replace the matplotlib saving section)
+        if iters % len(trainloader_u) == 0 and rank == 0:
+            print('Save debug images at iteration', iters)
+            out_dir = os.path.join(save_path, 'debug')
+            os.makedirs(out_dir, exist_ok=True)
+
+            # Prepare images for wandb
+            wandb_images = []
+
+            for b_i in range(min(cfg.get('wandb_max_debug_images', 2), img_x.shape[0])):
+                rows, cols = 3, 4
+                plot_dicts = [
+                    dict(title='Image L', data=img_x[b_i], type='image'),
+                    dict(title='Image S1', data=img_s1[b_i], type='image'),
+                    dict(title='Image S2', data=img_s2[b_i], type='image'),
+                    dict(title='Image FP', data=img_w[b_i], type='image'),
+                    dict(title='Pred L', data=pred_x[b_i], type='prediction', palette=palette),
+                    dict(title='Pred S1', data=pred_s1[b_i], type='prediction', palette=palette),
+                    dict(title='Pred S2', data=pred_s2[b_i], type='prediction', palette=palette),
+                    dict(title='Pred FP', data=pred_w_fp[b_i], type='prediction', palette=palette),
+                    dict(title='GT L', data=mask_x[b_i], type='label', palette=palette),
+                    dict(title='PL S1', data=mask_w_mixed1[b_i], type='label', palette=palette),
+                    dict(title='PL S2', data=mask_w_mixed2[b_i], type='label', palette=palette),
+                    dict(title='PL FP', data=mask_w[b_i], type='label', palette=palette),
+                ]
+
+                if maskclip_consistency_lambda != 0:
+                    plot_dicts.extend([
+                        None,
+                        dict(title='MC S1', data=mclip_mixed1[b_i], type='label', palette=palette),
+                        dict(title='MC S2', data=mclip_mixed2[b_i], type='label', palette=palette),
+                        dict(title='MC FP', data=mclip[b_i], type='label', palette=palette),
+                    ])
+                    rows += 1
+
+                fig, axs = plt.subplots(
+                    rows, cols, figsize=(2 * cols, 2 * rows), squeeze=False,
+                    gridspec_kw={'hspace': 0.1, 'wspace': 0, 'top': 0.95, 'bottom': 0, 'right': 1, 'left': 0})
+
+                for ax, plot_dict in zip(axs.flat, plot_dicts):
+                    if plot_dict is not None:
+                        plot_data(ax, **plot_dict)
+
+                # Save locally
+                img_path = os.path.join(out_dir, f'{(iters):07d}_{rank}-{b_i}.png')
+                plt.savefig(img_path)
+
+                # Add to wandb
+                if cfg.get('wandb_log_debug_images', True):
+                    wandb_images.append(wandb.Image(img_path, caption=f"Debug_{rank}-{b_i}"))
+
+                plt.close()
+
+            # Log all debug images to wandb
+            if wandb_images and cfg.get('wandb_log_debug_images', True):
+                wandb.log({"debug/training_images": wandb_images}, step=iters)
 
         if epoch % cfg.get('eval_every_n_epochs', 1) == 0 or epoch == cfg['epochs'] - 1:
             eval_mode = cfg['eval_mode']
@@ -411,14 +509,46 @@ if __name__ == '__main__':
 
             if rank == 0:
                 logger.info(run_name)
+
+                eval_log_dict = {
+                    'eval/mIoU': mIoU,
+                    'epoch': epoch,
+                }
+
+                # Log per-class IoU
+                class_iou_dict = {}
                 for (cls_idx, iou) in enumerate(iou_class):
+                    class_name = CLASSES[cfg['dataset']][cls_idx]
                     logger.info('***** Evaluation ***** >>>> Class [{:} {:}] '
-                                'IoU: {:.2f}'.format(cls_idx, CLASSES[cfg['dataset']][cls_idx], iou))
+                                'IoU: {:.2f}'.format(cls_idx, class_name, iou))
+
+                    # Add to tensorboard
+                    writer.add_scalar('eval/%s_IoU' % class_name, iou, epoch)
+
+                    # Add to wandb
+                    eval_log_dict[f'eval/{class_name}_IoU'] = iou
+                    class_iou_dict[class_name] = iou
                 logger.info('***** Evaluation {} ***** >>>> MeanIoU: {:.2f}\n'.format(eval_mode, mIoU))
-                
+
                 writer.add_scalar('eval/mIoU', mIoU, epoch)
                 for i, iou in enumerate(iou_class):
                     writer.add_scalar('eval/%s_IoU' % (CLASSES[cfg['dataset']][i]), iou, epoch)
+
+                # Log to wandb with additional metrics
+                eval_log_dict.update({
+                    'eval/best_mIoU': max(mIoU, previous_best),
+                    'eval/is_best': mIoU > previous_best,
+                })
+
+                wandb.log(eval_log_dict, step=epoch * len(trainloader_u))
+
+                # Optional: Create a wandb table for detailed class performance
+                if cfg.get('wandb_log_class_table', True):
+                    class_table = wandb.Table(
+                        columns=["Class", "IoU", "Class_Index"],
+                        data=[[CLASSES[cfg['dataset']][i], iou, i] for i, iou in enumerate(iou_class)]
+                    )
+                    wandb.log({"eval/class_performance": class_table}, step=epoch * len(trainloader_u))
 
             is_best = mIoU > previous_best
             previous_best = max(mIoU, previous_best)
@@ -431,3 +561,5 @@ if __name__ == '__main__':
                 torch.save(checkpoint, os.path.join(save_path, 'latest.pth'))
                 if is_best:
                     torch.save(checkpoint, os.path.join(save_path, 'best.pth'))
+    if rank == 0:
+        wandb.finish()
