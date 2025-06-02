@@ -103,6 +103,18 @@ def config_from_vars(
     cfg = dict()
     name = ''
 
+    # wandb cfg generate
+    cfg['wandb'] = {
+        'project': 'semivl-brickfield',
+        'tags': ['semi-supervised', 'segmentation', 'maskclip'],
+        'notes': 'Experimenting with maskclip consistency',
+        'watch_model': False,
+        'watch_freq': 1000,
+        'log_class_table': True,
+        'max_debug_images': 2,
+        'log_debug_images': True,
+    }
+
     # Dataset
     cfg['dataset'] = dataset
     name += dataset.replace('pascal', 'voc').replace('cityscapes', 'cs')
@@ -342,6 +354,7 @@ def generate_experiment_cfgs(exp_id):
                 pleval=True,
                 disable_dropout=False,  # changed from True - enable dropout for regularization
                 fp_rate=0.7, 
+                
             ),
         ]
         for kwargs, split, _ in itertools.product(kwargs_list, splits, range(n_repeat)):
@@ -360,6 +373,11 @@ def generate_experiment_cfgs(exp_id):
                 eval_every=2,
                 **kwargs,
             )
+            # Customize wandb for brickfield experiment
+            cfg['wandb']['project'] = 'semivl-brickfield'  # Change project name
+            cfg['wandb']['tags'] = ['brickfield', 'semi-supervised', f'exp{exp_id}', f'split-{split}']
+            cfg['wandb']['notes'] = f'Brickfield binary segmentation - {split} labeled samples'
+
             cfgs.append(cfg)
     # -------------------------------------------------------------------------
     # SemiVL on VOC

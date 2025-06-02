@@ -89,7 +89,7 @@ if __name__ == '__main__':
 
         # Initialize wandb
         wandb.init(
-            project=cfg.get('wandb_project', 'semi-supervised-segmentation'),
+            project=cfg.get('wandb_project', 'semivl-brickfield'),
             name=run_name,
             config={
                 **cfg,
@@ -98,13 +98,15 @@ if __name__ == '__main__':
                 'unlabeled_id_path': unlabeled_id_path,
                 'ngpus': world_size,
                 'exec_git_rev': get_git_revision(),
-                'exec_version': __version__
+                'exec_version': __version__,
+                'full_run_name': run_name  # Keep full name in config for reference
+
             },
             dir=save_path,
             tags=cfg.get('wandb_tags', []),
             notes=cfg.get('wandb_notes', ''),
             resume='allow',
-            id=f"{cfg['name']}_{uid}"
+            id=f"{cfg['name']}_{uid}"[:64]
         )
 
         # Watch model for gradients and parameters
