@@ -83,7 +83,13 @@ if __name__ == '__main__':
     if rank == 0:
         timestr = datetime.now().strftime("%y%m%d-%H%M")
         uid = str(uuid.uuid4())[:5]
-        run_name = f'{timestr}_{cfg["name"]}_v{__version__}_{uid}'.replace('.', '-')
+
+        # Run naming scheme
+        model_name = cfg.get("model", "unknown")  # Extract model name
+        dataset_name = cfg.get("dataset", "brickfield")  # Extract dataset
+        batch_num = cfg.get("batch_size", "1") # Extract batch number
+
+        run_name = f'{model_name}_{dataset_name}_bs{batch_num}_{timestr}_{uid}'
         save_path = f'exp/exp-{cfg["exp"]}/{run_name}'
         os.makedirs(save_path, exist_ok=True)
 
