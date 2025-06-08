@@ -64,6 +64,7 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, required=True)
     parser.add_argument('--local_rank', default=0, type=int)
     parser.add_argument('--port', default=None, type=int)
+    parser.add_argument('--resume-from', type=str, default=None, help='Resume training from checkpoint')
 
     args = parser.parse_args()
 
@@ -222,8 +223,29 @@ if __name__ == '__main__':
         logger.info(f'Train for {cfg["epochs"]} epochs / {total_iters} iterations.')
     previous_best = 0.0
     epoch = -1
+
+    # Add this block before the training loop
+    start_epoch = 0
+    if args.resume_from and os.path.exists(args.resume_from):
+        if rank == 0:
+            logger.info(f'Resuming training from {args.resume_from}')
+        
+        checkpoint = torch.load(args.resume_from, map_location='cpu')
+        
+        # Load model state
+        model.load_state_dict(checkpoint['model'])
+        
+        # Load optimizer state
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        
+        # Load epoch
+        start_epoch = checkpoint['epoch'] + 1
+        
+        if rank == 0:
+            logger.info(f'Resumed from epoch {checkpoint["epoch"]}, starting epoch {start_epoch}')
     
-    for epoch in range(epoch + 1, cfg['epochs']):
+    # for epoch in range(epoch + 1, cfg['epochs']):
+    for epoch in range(start_epoch, cfg['epochs']):
         if rank == 0:
             logger.info('===========> Epoch: {:}, LR: {:.5f}, Previous best: {:.2f}'.format(
                 epoch, optimizer.param_groups[0]['lr'], previous_best))
