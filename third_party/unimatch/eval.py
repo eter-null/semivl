@@ -32,11 +32,25 @@ parser.add_argument('--logit-path', default=None, type=str)
 parser.add_argument('--local_rank', default=0, type=int)
 parser.add_argument('--port', default=None, type=int)
 
+def compute_f1_score(intersection, union, target):
+    """Compute F1 score from intersection, union, and target arrays"""
+    # Precision = TP / (TP + FP) = intersection / prediction
+    # Recall = TP / (TP + FN) = intersection / target
+    # F1 = 2 * (precision * recall) / (precision + recall)
+    
+    prediction = intersection + (union - intersection)  # TP + FP
+    precision = intersection / (prediction + 1e-10)
+    recall = intersection / (target + 1e-10)
+    f1 = 2 * (precision * recall) / (precision + recall + 1e-10)
+    return f1
 
 def evaluate(model, loader, mode, cfg, distributed=True, pred_path=None, logit_path=None):
     model.eval()
     intersection_meter = AverageMeter()
     union_meter = AverageMeter()
+    intersection_meter = AverageMeter()
+    union_meter = AverageMeter()
+    target_meter = AverageMeter() 
     palette = get_palette(cfg['dataset'])
 
     with torch.no_grad():
@@ -76,11 +90,14 @@ def evaluate(model, loader, mode, cfg, distributed=True, pred_path=None, logit_p
 
             intersection_meter.update(reduced_intersection.cpu().numpy())
             union_meter.update(reduced_union.cpu().numpy())
+            target_meter.update(reduced_target.cpu().numpy())
 
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10) * 100.0
+    f1_class = compute_f1_score(intersection_meter.sum, union_meter.sum, target_meter.sum) * 100.0
     mIOU = np.mean(iou_class)
+    mF1 = np.mean(f1_class)
 
-    return mIOU, iou_class
+    return mIOU, iou_class, mF1, f1_class
 
 def main():
     args = parser.parse_args()
@@ -149,17 +166,17 @@ def main():
         eval_mode = cfg['eval_mode']
     else:
         eval_mode = 'sliding_window' if cfg['dataset'] == 'cityscapes' else 'original'
-    mIoU, iou_class = evaluate(
+    mIoU, iou_class, mF1, f1_class = evaluate( 
         model, valloader, eval_mode, cfg, 
         distributed=args.port is not None,
         pred_path=args.pred_path,
         logit_path=args.logit_path)
 
     if rank == 0:
-        for (cls_idx, iou) in enumerate(iou_class):
+        for (cls_idx, (iou, f1)) in enumerate(zip(iou_class, f1_class)):
             logger.info('***** Evaluation ***** >>>> Class [{:} {:}] '
-                        'IoU: {:.2f}'.format(cls_idx, CLASSES[cfg['dataset']][cls_idx], iou))
-        logger.info('***** Evaluation {} ***** >>>> MeanIoU: {:.2f}\n'.format(eval_mode, mIoU))
+                        'IoU: {:.2f} F1: {:.2f}'.format(cls_idx, CLASSES[cfg['dataset']][cls_idx], iou, f1))
+        logger.info('***** Evaluation {} ***** >>>> MeanIoU: {:.2f} MeanF1: {:.2f}\n'.format(eval_mode, mIoU, mF1))
 
 
 if __name__ == '__main__':
