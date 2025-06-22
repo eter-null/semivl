@@ -1,3 +1,4 @@
+#f1 1
 import argparse
 import logging
 import os
@@ -14,6 +15,8 @@ from torch.utils.data import DataLoader
 import yaml
 from tqdm import tqdm
 from datasets.palettes import get_palette
+
+from torchmetrics import F1Score
 
 from third_party.unimatch.dataset.semi import SemiDataset
 from model.builder import build_model
@@ -32,52 +35,62 @@ parser.add_argument('--logit-path', default=None, type=str)
 parser.add_argument('--local_rank', default=0, type=int)
 parser.add_argument('--port', default=None, type=int)
 
-def compute_f1_score(intersection, union, target):
-    """Compute F1 score from intersection, union, and target arrays"""
-    # Precision = TP / (TP + FP) = intersection / prediction
-    # Recall = TP / (TP + FN) = intersection / target
-    # F1 = 2 * (precision * recall) / (precision + recall)
-    
-    prediction = intersection + (union - intersection)  # TP + FP
-    precision = intersection / (prediction + 1e-10)
-    recall = intersection / (target + 1e-10)
-    f1 = 2 * (precision * recall) / (precision + recall + 1e-10)
-    return f1
 
 def evaluate(model, loader, mode, cfg, distributed=True, pred_path=None, logit_path=None):
     model.eval()
     intersection_meter = AverageMeter()
     union_meter = AverageMeter()
-    intersection_meter = AverageMeter()
-    union_meter = AverageMeter()
-    target_meter = AverageMeter() 
     palette = get_palette(cfg['dataset'])
+    
+    # int f1 metric
+    f1_metric = F1Score(
+        task='multiclass',
+        num_classes=cfg['nclass'], 
+        average='macro',
+        ignore_index=255  
+    ).cuda()
+    
+    # per class f1 scores
+    f1_per_class_metric = F1Score(
+        task='multiclass',
+        num_classes=cfg['nclass'], 
+        average=None,
+        ignore_index=255
+    ).cuda()
 
     with torch.no_grad():
         for img, mask, id in tqdm(loader, total=len(loader)):
             file_name, lbl_name = id[0].split(' ')
             img = img.cuda()
+            mask = mask.cuda()  
 
             pred, final = predict(model, img, mask, mode, cfg, return_logits=True)
 
             if logit_path is not None:
                 logit_file = os.path.join(logit_path, lbl_name.split('/')[-1])\
                     .replace('.png', '.pt')
-                # print(logit_file)
                 os.makedirs(os.path.dirname(logit_file), exist_ok=True)
                 torch.save(final.detach().cpu(), logit_file)
 
             if pred_path is not None:
                 pred_file = os.path.join(pred_path, lbl_name.split('/')[-1])
-                # print(pred_file)
                 os.makedirs(os.path.dirname(pred_file), exist_ok=True)
                 np_pred = pred[0].cpu().numpy().astype(np.uint8)
                 output = Image.fromarray(np_pred).convert('P')
                 output.putpalette(palette)
                 output.save(pred_file)
 
+
+            if isinstance(pred, np.ndarray):
+                pred_tensor = torch.from_numpy(pred).cuda()
+            else:
+                pred_tensor = pred.cuda() if not pred.is_cuda else pred
+            f1_metric.update(pred_tensor, mask)
+            f1_per_class_metric.update(pred_tensor, mask)
+
+
             intersection, union, target = \
-                intersectionAndUnion(pred.cpu().numpy(), mask.numpy(), cfg['nclass'], 255)
+                intersectionAndUnion(pred.cpu().numpy(), mask.cpu().numpy(), cfg['nclass'], 255)
 
             reduced_intersection = torch.from_numpy(intersection).cuda()
             reduced_union = torch.from_numpy(union).cuda()
@@ -90,14 +103,20 @@ def evaluate(model, loader, mode, cfg, distributed=True, pred_path=None, logit_p
 
             intersection_meter.update(reduced_intersection.cpu().numpy())
             union_meter.update(reduced_union.cpu().numpy())
-            target_meter.update(reduced_target.cpu().numpy())
+
 
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10) * 100.0
-    f1_class = compute_f1_score(intersection_meter.sum, union_meter.sum, target_meter.sum) * 100.0
     mIOU = np.mean(iou_class)
-    mF1 = np.mean(f1_class)
+    
 
-    return mIOU, iou_class, mF1, f1_class
+    mean_f1 = f1_metric.compute()
+    f1_per_class = f1_per_class_metric.compute()
+    
+    
+    f1_metric.reset()
+    f1_per_class_metric.reset()
+
+    return mIOU, iou_class, mean_f1, f1_per_class
 
 def main():
     args = parser.parse_args()
@@ -166,17 +185,25 @@ def main():
         eval_mode = cfg['eval_mode']
     else:
         eval_mode = 'sliding_window' if cfg['dataset'] == 'cityscapes' else 'original'
-    mIoU, iou_class, mF1, f1_class = evaluate( 
+    
+    mIoU, iou_class, mean_f1, f1_per_class = evaluate(
         model, valloader, eval_mode, cfg, 
         distributed=args.port is not None,
         pred_path=args.pred_path,
         logit_path=args.logit_path)
 
     if rank == 0:
-        for (cls_idx, (iou, f1)) in enumerate(zip(iou_class, f1_class)):
+        # iou
+        for (cls_idx, iou) in enumerate(iou_class):
             logger.info('***** Evaluation ***** >>>> Class [{:} {:}] '
-                        'IoU: {:.2f} F1: {:.2f}'.format(cls_idx, CLASSES[cfg['dataset']][cls_idx], iou, f1))
-        logger.info('***** Evaluation {} ***** >>>> MeanIoU: {:.2f} MeanF1: {:.2f}\n'.format(eval_mode, mIoU, mF1))
+                        'IoU: {:.2f}'.format(cls_idx, CLASSES[cfg['dataset']][cls_idx], iou))
+        logger.info('***** Evaluation {} ***** >>>> MeanIoU: {:.2f}\n'.format(eval_mode, mIoU))
+        
+        # f1
+        for (cls_idx, f1) in enumerate(f1_per_class):
+            logger.info('***** Evaluation ***** >>>> Class [{:} {:}] '
+                        'F1: {:.2f}'.format(cls_idx, CLASSES[cfg['dataset']][cls_idx], f1.item() * 100))
+        logger.info('***** Evaluation {} ***** >>>> Mean F1: {:.2f}\n'.format(eval_mode, mean_f1.item() * 100))
 
 
 if __name__ == '__main__':
