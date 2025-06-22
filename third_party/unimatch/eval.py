@@ -1,4 +1,3 @@
-#f1 1
 import argparse
 import logging
 import os
@@ -123,7 +122,6 @@ def main():
 
     cfg = yaml.load(open(args.config, "r"), Loader=yaml.Loader)
 
-    # Legacy config support
     cfg.setdefault('text_embedding_variant', None)
     cfg.setdefault('pl_text', cfg['text_embedding_variant'])
     cfg['clip_encoder'] = None
